@@ -1,0 +1,27 @@
+# Python и окружения
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# IDE / ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Секреты, личные настройки
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Генерируемые результаты запуска
+/dist/
+/received/
+/reports/
+
+# Используйте отдельные правила для больших данных, если это нужно.
