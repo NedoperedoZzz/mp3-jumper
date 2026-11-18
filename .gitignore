@@ -1,27 +1,12 @@
-# Python и окружения
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.venv/
-venv/
-
-# IDE / ОС
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
-
-# Секреты, личные настройки
+# Примеры; дополните правилами для своего языка и проекта.
 .env
 .env.*
 !.env.example
-*.pem
-*.key
-
-# Генерируемые результаты запуска
-/dist/
-/received/
-/reports/
-
-# Используйте отдельные правила для больших данных, если это нужно.
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+build/
+*.pyc
+.DS_Store
