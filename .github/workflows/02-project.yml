@@ -5,7 +5,7 @@ on:
 
 jobs:
   generate-artifact:
-    runs-on: ubuntu-latest # Используем стандартный раннер, без Docker
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,26 +27,37 @@ jobs:
 
       - name: Create Test Audio
         run: |
-          echo "Генерация тестовых аудиофайлов..."
+          echo "=========================================================="
+          echo "[PROJECT CI] Что делаем: Генерация трех тестовых аудиофайлов"
+          echo "[PROJECT CI] Как делаем: ffmpeg -f lavfi -i sine=..."
+          echo "[PROJECT CI] Зачем: Чтобы продемонстрировать склейку без хранения бинарных файлов в Git"
+          echo "=========================================================="
           ffmpeg -f lavfi -i "sine=frequency=440:duration=10" -c:a libmp3lame test1.mp3
           ffmpeg -f lavfi -i "sine=frequency=554:duration=10" -c:a libmp3lame test2.mp3
           ffmpeg -f lavfi -i "sine=frequency=659:duration=10" -c:a libmp3lame test3.mp3
+          echo "[PROJECT CI] Тестовые файлы успешно созданы."
 
       - name: Run App Logic to Merge Audio
         run: |
-          echo "Запуск кода проекта для склейки..."
+          echo "=========================================================="
+          echo "[PROJECT CI] Что делаем: Склейка аудиофайлов с кроссфейдом"
+          echo "[PROJECT CI] Как делаем: Вызов функции merge_audio из app/audio.py"
+          echo "[PROJECT CI] Зачем: Проверка реальной работоспособности бэкенда проекта"
+          echo "=========================================================="
           python -c "
           from pathlib import Path
           from app.audio import merge_audio
           files = [Path('test1.mp3'), Path('test2.mp3'), Path('test3.mp3')]
           merge_audio(files, Path('demo_mix.mp3'))
           "
+          echo "[PROJECT CI] Склейка завершена успешно."
 
       - name: Verify Result
         run: |
+          echo "[PROJECT CI] Проверка созданного артефакта:"
           ls -lh demo_mix.mp3
-          # Проверяем, что файл создался и весит больше 0 байт
           test -s demo_mix.mp3
+          echo "[PROJECT CI] Файл demo_mix.mp3 существует и не пуст."
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
