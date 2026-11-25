@@ -6,7 +6,7 @@
 
 ## Архитектура
 *   **Бэкенд:** Python, FastAPI. Обработка аудио через `subprocess` (FFmpeg) и библиотеку `pycrossfade`.
-*   **ИИ-интеграция:** `ollama` (модель `qwen3.2:1b` по умолчанию).
+*   **ИИ-интеграция:** `ollama` (модель `llama3.2:1b` по умолчанию).
 *   **Фронтенд:** Vanilla JS, CSS. Адаптивный дизайн, Drag-and-Drop, кастомный аудиоплеер.
 *   **CI/CD (GitHub Actions):**
     *   `01-quality.yml`: Проверка кода линтером (Ruff) и юнит-тесты (Pytest) логики склейки (с моками) и парсинга метаданных. Запускается автоматически на `push`.
@@ -14,7 +14,7 @@
 
 ## Запуск локально
 1. Установите FFmpeg (`sudo apt install ffmpeg` или скачайте с сайта ffmpeg.org).
-2. Установите и запустите Ollama (скачайте с ollama.com), выполните `ollama run qwen2.5:0.5b`.
+2. Установите и запустите Ollama (скачайте с ollama.com), выполните `ollama run llama3.2:1b`.
 3. Установите зависимости: `pip install -r requirements.txt`
 4. Запустите сервер: `uvicorn app.main:app --reload`
 5. Откройте `http://localhost:8000`
