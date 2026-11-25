@@ -1,0 +1,56 @@
+name: "Project CI - Generate Demo Mix"
+
+on:
+  workflow_dispatch: # Только ручной запуск
+
+jobs:
+  generate-artifact:
+    runs-on: ubuntu-latest # Используем стандартный раннер, без Docker
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1 rubberband-cli
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Test Audio
+        run: |
+          echo "Генерация тестовых аудиофайлов..."
+          ffmpeg -f lavfi -i "sine=frequency=440:duration=10" -c:a libmp3lame test1.mp3
+          ffmpeg -f lavfi -i "sine=frequency=554:duration=10" -c:a libmp3lame test2.mp3
+          ffmpeg -f lavfi -i "sine=frequency=659:duration=10" -c:a libmp3lame test3.mp3
+
+      - name: Run App Logic to Merge Audio
+        run: |
+          echo "Запуск кода проекта для склейки..."
+          python -c "
+          from pathlib import Path
+          from app.audio import merge_audio
+          files = [Path('test1.mp3'), Path('test2.mp3'), Path('test3.mp3')]
+          merge_audio(files, Path('demo_mix.mp3'))
+          "
+
+      - name: Verify Result
+        run: |
+          ls -lh demo_mix.mp3
+          # Проверяем, что файл создался и весит больше 0 байт
+          test -s demo_mix.mp3
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-mix-result
+          path: demo_mix.mp3
+          retention-days: 7
