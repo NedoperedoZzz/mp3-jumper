@@ -1,12 +1,24 @@
-# Примеры; дополните правилами для своего языка и проекта.
-.env
-.env.*
-!.env.example
+# Виртуальное окружение Python
+.venv/
+venv/
+env/
+
+# Временные файлы, создаваемые приложением (загруженные миксы)
+temp/
+
+# Кэш Python и Pytest
 __pycache__/
+*.py[cod]
 .pytest_cache/
-.ruff_cache/
-node_modules/
-dist/
-build/
-*.pyc
+
+# Настройки IDE (VS Code, PyCharm)
+.vscode/
+.idea/
+
+# Файлы операционной системы
 .DS_Store
+Thumbs.db
+
+# Сгенерированные файлы (демо-миксы из CI, если вы тестировали локально)
+demo_mix.mp3
+test*.mp3

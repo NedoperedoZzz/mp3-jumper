@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MixMaster</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>MixMaster 🎵</h1>
+        <p>Загрузите MP3-файлы и перетащите их в нужном порядке.</p>
+
+                <!-- Скрываем нативный инпут и делаем красивую кнопку -->
+        <input type="file" id="fileInput" multiple accept=".mp3" style="display: none;">
+        <label for="fileInput" class="custom-file-upload">
+            + Добавить MP3 файлы
+        </label>
+        <ul id="fileList" class="drag-list"></ul>
+
+        <div class="options">
+            <label>
+                <input type="checkbox" id="smartMode">
+                <b>Умные переходы (pyCrossfade)</b> <span style="color:#888; font-size:12px;">(анализ BPM, может занять несколько минут)</span>
+            </label>
+        </div>
+
+        <button id="mergeBtn" disabled>Объединить в микс</button>
+
+        <!-- Прогресс-бар -->
+        <div id="progressContainer" style="display:none;">
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            <p id="progressText">Идет обработка. Пожалуйста, подождите...</p>
+        </div>
+
+        <div id="resultSection" style="display:none;">
+            <h2>Ваш микс готов!</h2>
+            <audio id="audioPlayer" controls></audio>
+
+            <div id="timestamps">
+                <h3>Тайм-коды треков:</h3>
+                <ul id="tsList" style="list-style: none; padding: 0; margin: 0;"></ul>
+            </div>
+
+            <div class="title-gen">
+                <input type="text" id="mixTitle" value="my_mix" placeholder="Название микса">
+                <button id="generateTitleBtn">✨ Сгенерировать ИИ</button>
+            </div>
+
+            <button id="downloadBtn">Скачать MP3</button>
+            <button id="resetBtn" class="reset-btn" style="display: block; margin-top: 15px; background: #444; color: white;">Создать новый микс</button>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>

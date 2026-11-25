@@ -4,7 +4,6 @@ import json
 import subprocess
 from pathlib import Path
 
-
 CHECKS = [
     ("lint", ["python", "-m", "ruff", "check", "."]),
     ("format", ["python", "-m", "ruff", "format", "--check", "."]),

@@ -7,7 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 BAD_NAMES = {".env", "id_rsa", "id_ed25519"}
 BAD_SUFFIXES = {".pyc", ".p12", ".pfx", ".pem", ".key"}
 BAD_DIRECTORIES = {"__pycache__", ".venv", "venv", ".pytest_cache"}

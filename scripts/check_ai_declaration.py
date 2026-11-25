@@ -6,7 +6,6 @@
 import re
 from pathlib import Path
 
-
 DECLARATION = Path("AI_MODELS.md")
 ALLOWED_STATUSES = {"ИСПОЛЬЗОВАЛ", "НЕ ИСПОЛЬЗОВАЛ"}
 
