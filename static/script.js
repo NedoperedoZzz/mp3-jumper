@@ -314,4 +314,4 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('mergeBtn').disabled = true;
 });
 
-setStatus('Бессерверный режим: склейка и скачивание выполняются в твоём браузере. ИИ-кнопка отключена (ей нужен сервер с ключом).', 'ok');
+setStatus('Бессерверный режим: склейка и скачивание выполняются в вашем браузере. ИИ-кнопка отключена (ей нужен сервер с ключом).', 'ok');
