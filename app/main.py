@@ -1,18 +1,35 @@
+import os
 import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.audio import merge_audio
-from app.llm import generate_mix_title
+from app.llm import LLMUnavailable, generate_mix_title, llm_status
 from app.metadata import extract_metadata, format_prompt_metadata
 
 app = FastAPI()
 TEMP_DIR = Path("temp")
 TEMP_DIR.mkdir(exist_ok=True)
+
+# Фронтенд может лежать на GitHub Pages, а этот API — на Render/Fly/VPS.
+# Тогда браузер идёт сюда с другого origin, и без CORS он получит отказ.
+# По умолчанию CORS выключен (тот же источник), список включается переменной:
+#   ALLOWED_ORIGINS="https://nedoperedozzz.github.io,http://127.0.0.1:8000"
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -25,6 +42,17 @@ async def favicon():
 @app.get("/")
 def read_root():
     return FileResponse("static/index.html")
+
+
+@app.get("/api/health")
+def health():
+    """Проверка живости для фронтенда: работает ли склейка и настроена ли модель."""
+    return {
+        "status": "ok",
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "cors_enabled": bool(ALLOWED_ORIGINS),
+        "llm": llm_status(),
+    }
 
 
 @app.post("/api/merge")
@@ -73,7 +101,11 @@ async def generate_title(session_id: str = Form(...), temperature: float = Form(
         return JSONResponse(status_code=404, content={"error": "Session not found"})
 
     prompt = meta_file.read_text(encoding="utf-8")
-    title = generate_mix_title(prompt, temperature)
+    try:
+        title = generate_mix_title(prompt, temperature)
+    except LLMUnavailable as exc:
+        # Не притворяемся успехом: фронт покажет настоящую причину
+        return JSONResponse(status_code=503, content={"error": str(exc)})
     return {"title": title}
 
 

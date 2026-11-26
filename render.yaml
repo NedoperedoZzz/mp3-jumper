@@ -1,0 +1,45 @@
+# Blueprint для Render: поднимает только API. Фронтенд остаётся на GitHub Pages
+# (Pages умеет отдавать файлы, а исполнять Python — нет).
+# Деплой: подключи репозиторий в Render -> New -> Blueprint, либо
+# `render-cli`/кнопка Deploy. Все переменные можно поменять в дашборде.
+services:
+  - type: web
+    name: mp3-jumper-api
+    runtime: docker
+    dockerfilePath: ./my_container.dockerfile
+    plan: free              # 512 MB: локальную LLM здесь не держать, только API-провайдер
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      # Фронтенд на Pages должен быть в списке разрешённых origin'ов
+      - key: ALLOWED_ORIGINS
+        value: https://nedoperedozzz.github.io
+      # Режим LLM: openai = любой OpenAI-совместимый облачный API
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: LLM_MODEL
+        value: meta-llama/llama-3.2-1b-instruct:free
+      - key: LLM_TIMEOUT
+        value: "45"
+      # Секрет: задаётся в дашборде, в репозиторий не попадает
+      - key: LLM_API_KEY
+        sync: false
+
+# Если Render не даёт free-план для runtime: docker, тот же сервис описывается
+# через Python-runtime (FFmpeg тогда ставится build-командой, а не образом):
+# services:
+#   - type: web
+#     name: mp3-jumper-api
+#     runtime: python
+#     plan: free
+#     buildCommand: apt-get update && apt-get install -y ffmpeg libsndfile1 rubberband-cli && pip install -r requirements.txt
+#     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+#     healthCheckPath: /api/health
+#     envVars:
+#       - { key: ALLOWED_ORIGINS, value: https://nedoperedozzz.github.io }
+#       - { key: LLM_PROVIDER, value: openai }
+#       - { key: LLM_BASE_URL, value: https://openrouter.ai/api/v1 }
+#       - { key: LLM_MODEL, value: meta-llama/llama-3.2-1b-instruct:free }
+#       - { key: LLM_API_KEY, sync: false }

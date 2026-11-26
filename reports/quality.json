@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "checks": [
+    {
+      "check": "lint",
+      "exit_code": 0
+    },
+    {
+      "check": "format",
+      "exit_code": 0
+    },
+    {
+      "check": "tests",
+      "exit_code": 0
+    },
+    {
+      "check": "hygiene",
+      "exit_code": 0
+    },
+    {
+      "check": "ai-declaration",
+      "exit_code": 0
+    }
+  ]
+}

@@ -5,6 +5,62 @@
 const API_BASE = (window.MP3_API_BASE ?? "").replace(/\/+$/, "");
 const apiUrl = (path) => `${API_BASE}${path}`;
 
+// --- Состояние бэкенда -------------------------------------------------
+// Страница умеет жить отдельно от API (GitHub Pages), поэтому честно
+// сообщаем, есть ли рядом FastAPI: /api/health отвечает за склейку и за то,
+// настроена ли LLM (Render/Fly локальный Ollama иметь не может в принципе).
+let backendOnline = null; // null = ещё не проверяли
+let llmReady = false;
+
+function setBackendStatus(text, kind) {
+    const badge = document.getElementById('backendStatus');
+    if (!badge) return;
+    badge.textContent = text;
+    badge.className = `backend-status backend-status--${kind}`;
+}
+
+async function checkBackend() {
+    setBackendStatus('Проверяю соединение с бэкендом\u2026', 'checking');
+    try {
+        const res = await fetch(apiUrl('/api/health'), { method: 'GET' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const info = await res.json();
+        backendOnline = true;
+        llmReady = !!(info.llm && info.llm.configured);
+        if (!info.ffmpeg) {
+            setBackendStatus('Бэкенд на связи, но на сервере нет FFmpeg \u2014 склейка невозможна.', 'warn');
+        } else if (llmReady) {
+            setBackendStatus(`Бэкенд на связи. ИИ: ${info.llm.provider}/${info.llm.model}.`, 'ok');
+        } else {
+            setBackendStatus(`Склейка работает. ИИ выключен: ${info.llm.reason || 'модель не настроена'}.`, 'warn');
+        }
+    } catch (err) {
+        backendOnline = false;
+        llmReady = false;
+        // Разные причины по-разному и объясняем: адрес не задан (витрина)
+        // или задан, но сервер молчит (CORS, сон бесплатного тарифа, неверный URL).
+        const reason = API_BASE
+            ? `Бэкенд ${API_BASE} не отвечает (${err.message}). Это может быть сон бесплатного тарифа после простоя или запрет CORS. Повторите проверку.`
+            : 'Бэкенд не подключён (window.MP3_API_BASE пуст): страница работает как витрина. Склейка и ИИ требуют запущенного FastAPI \u2014 см. docs/BACKEND.md.';
+        setBackendStatus(reason + ' Нажмите на строку, чтобы проверить снова.', 'off');
+    }
+}
+
+// Описание ошибок для alert: без него пользователь видит «Произошла ошибка»,
+// а настоящих причин три: нет бэкенда (404/CORS), упал ffmpeg (500), не настроена LLM (503).
+async function errorFromResponse(res) {
+    try {
+        const body = await res.json();
+        if (body && (body.error || body.detail)) {
+            return typeof body.detail === 'string' ? body.detail : body.error;
+        }
+    } catch (e) {
+        /* тело не JSON (например, 404 от GitHub Pages) */
+    }
+    return `ошибка сервера (${res.status})`;
+}
+
+
 let currentSessionId = null;
 let selectedFiles = []; // Массив для хранения файлов в правильном порядке
 
@@ -112,7 +168,7 @@ document.getElementById('mergeBtn').addEventListener('click', async () => {
     try {
         const res = await fetch(apiUrl('/api/merge'), { method: 'POST', body: formData });
 
-        if (!res.ok) throw new Error("Ошибка сервера");
+        if (!res.ok) throw new Error(await errorFromResponse(res));
 
         const data = await res.json();
         currentSessionId = data.session_id;
@@ -139,7 +195,7 @@ document.getElementById('mergeBtn').addEventListener('click', async () => {
             tsDiv.style.display = 'block';
         }
     } catch (err) {
-        alert("Произошла ошибка при склейке!");
+        alert(`Не получилось склеить: ${err.message}`);
         progress.style.display = 'none';
         btn.style.display = 'block';
     }
@@ -147,15 +203,25 @@ document.getElementById('mergeBtn').addEventListener('click', async () => {
 
 // Остальные функции (generateTitleBtn, downloadBtn) остаются без изменений
 document.getElementById('generateTitleBtn').addEventListener('click', async () => {
-    if (!currentSessionId) return;
+    const btn = document.getElementById('generateTitleBtn');
+    if (!currentSessionId) {
+        alert("Сначала склейте треки: сервер предлагает название по метаданным готового микса.");
+        return;
+    }
     const formData = new FormData();
     formData.append('session_id', currentSessionId);
-    const btn = document.getElementById('generateTitleBtn');
     btn.textContent = "Генерация...";
-    const res = await fetch(apiUrl('/api/generate-title'), { method: 'POST', body: formData });
-    const data = await res.json();
-    document.getElementById('mixTitle').value = data.title;
-    btn.textContent = "✨ Сгенерировать ИИ";
+    try {
+        const res = await fetch(apiUrl('/api/generate-title'), { method: 'POST', body: formData });
+        if (!res.ok) throw new Error(await errorFromResponse(res));
+        const data = await res.json();
+        document.getElementById('mixTitle').value = data.title;
+    } catch (err) {
+        // 503 = бэкенд жив, но модель недоступна (на Render её обычно нет)
+        alert(`ИИ не сгенерировал название: ${err.message}`);
+    } finally {
+        btn.textContent = "✨ Сгенерировать ИИ";
+    }
 });
 
 document.getElementById('downloadBtn').addEventListener('click', () => {
@@ -201,3 +267,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
     document.getElementById('mergeBtn').style.display = 'block';
     document.getElementById('mergeBtn').disabled = true;
 });
+
+// Проверка бэкенда при загрузке и по клику на плашку (повторная попытка).
+checkBackend();
+document.getElementById('backendStatus')?.addEventListener('click', checkBackend);

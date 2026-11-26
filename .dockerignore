@@ -1,0 +1,21 @@
+# Содержимое репозитория в образ не нужно: серверу важны только app/ и static/
+.git
+.gitattributes
+.github
+.dockerignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+temp/
+tests/
+docs/
+scripts/
+src/
+data/
+*.mp3
+*.md
+.idea/
+.vscode/

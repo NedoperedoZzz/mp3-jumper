@@ -12,6 +12,10 @@
     <div class="container">
         <h1>MixMaster 🎵</h1>
         <p>Загрузите MP3-файлы и перетащите их в нужном порядке.</p>
+        <!-- Статус бэкенда: страница на GitHub Pages без API — это витрина -->
+        <div id="backendStatus" class="backend-status backend-status--checking">
+            Проверяю соединение с бэкендом…
+        </div>
 
                 <!-- Скрываем нативный инпут и делаем красивую кнопку -->
         <input type="file" id="fileInput" multiple accept=".mp3" style="display: none;">
@@ -58,8 +62,11 @@
     <!-- Адрес бэкенда (FastAPI). GitHub Pages хостит только статику, поэтому на Pages тут должен быть URL запущенного API.
          Пустая строка = тот же источник (локальный `uvicorn app.main:app`). -->
     <script>
+        // Пусто = бэкенд там же, где страница (локальный uvicorn).
+        // Для сайта на GitHub Pages сюда вставляется адрес FastAPI, выложенного
+        // на Render/Fly (см. docs/BACKEND.md) и разрешённого в ALLOWED_ORIGINS:
+        //   window.MP3_API_BASE = "https://mp3-jumper.onrender.com";
         window.MP3_API_BASE = "";
-        // Пример: window.MP3_API_BASE = "https://mp3-jumper.onrender.com";
     </script>
     <script src="script.js"></script>
 </body>
