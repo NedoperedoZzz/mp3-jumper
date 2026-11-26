@@ -11,7 +11,7 @@
 ## Quality CI — проверка качества
 
 - **Ссылка на workflow:** https://github.com/NedoperedoZzz/mp3-jumper/blob/master/.github/workflows/01-quality.yml
-- **Ссылка на успешный запуск на актуальном коммите:** https://github.com/NedoperedoZzz/mp3-jumper/actions/runs/45698156715
+- **Ссылка на успешный запуск на актуальном коммите:** https://github.com/NedoperedoZzz/mp3-jumper/actions/runs/45830550983
 - **Что проверяется и почему это важно для проекта (не менее двух проверок):**
   1. Статический анализ (Ruff): проверяет стиль кода, отсутствие неиспользуемых импортов и опечаток, чтобы поддерживать чистоту кодовой базы.
   2. Юнит-тесты (Pytest): проверяют логику отказоустойчивости (fallback с pycrossfade на ffmpeg), корректность формирования команд FFmpeg и обработку ответов от LLM (включая безопасный fallback при ошибке сети).
@@ -23,8 +23,8 @@
 - **Ссылка на workflow:** https://github.com/NedoperedoZzz/mp3-jumper/blob/master/.github/workflows/02-project.yml
 - **Как он запускается и что использует на входе:** Запускается вручную (`workflow_dispatch`). На входе генерирует собственные тестовые MP3-файлы (синусоиды) с помощью FFmpeg.
 - **Какая полезная работа выполняется:** Вызывает реальную функцию `merge_audio` из кода проекта для склейки сгенерированных аудиофайлов.
-- **Ссылка на успешный запуск:** https://github.com/NedoperedoZzz/mp3-jumper/actions/runs/45698512380
-- **Ссылка на артефакт, сайт, отчёт или другой результат:** [ВСТАВЬТЕ ССЫЛКУ НА СКАЧИВАНИЕ АРТЕФАКТА (можно ссылку на run или на сам ZIP)]
+- **Ссылка на успешный запуск:** https://github.com/NedoperedoZzz/mp3-jumper/actions/runs/45838730312
+- **Ссылка на артефакт, сайт, отчёт или другой результат:** [Демо-микс из синусоид](https://github.com/NedoperedoZzz/mp3-jumper/actions/runs/45838730312/artifacts/15127247837) | [Сайт](https://nedoperedozzz.github.io/mp3-jumper/)
 - **Где увидеть результат, созданный CI, а не просто лог:** В нижней части страницы успешного запуска Project CI находится блок **Artifacts**, откуда можно скачать архив `demo-mix-result` с готовым файлом `demo_mix.mp3`.
 
 ## Декларация моделей ИИ
