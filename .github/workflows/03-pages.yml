@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main, master ]
     paths:
-      - 'static/**'  # Запускается только при изменениях в папке static
+      - 'static/**'                       # Запускается при изменениях сайта
+      - '.github/workflows/03-pages.yml'  # ...и при правках самого workflow
   workflow_dispatch: # Можно запустить и вручную
 
 # Устанавливаем необходимые разрешения для деплоя на Pages
@@ -18,11 +19,20 @@ concurrency:
   group: "pages"
   cancel-in-progress: false
 
+# ВАЖНО: сборка артефакта и деплой разнесены по двум jobs.
+#
+# Причина: actions/deploy-pages ищет артефакт "github-pages" через API
+# листинга артефактов. Когда upload-pages-artifact и deploy-pages идут
+# друг за другом в ОДНОМ job, запрос уходит через ~0.3 с после финализации
+# артефакта и может вернуть пустой список ->
+#   Error: No artifacts named "github-pages" were found for this workflow run
+# Это известный гонковый баг GitHub (actions/deploy-pages#451), а не ошибка
+# в твоём YAML. Два jobs = между финализацией и листингом проходит несколько
+# секунд (подъём второго раннера), плюс ниже стоит явная проверка.
+# Побочный плюс: реран упавшего job deploy не создаёт второй артефакт.
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
+    name: "Upload Pages artifact"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,9 +44,73 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Указываем, какую именно папку нужно опубликовать
+          # Публикуем содержимое папки static: index.html попадает в корень сайта
           path: './static'
+
+  deploy:
+    name: "Deploy to GitHub Pages"
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      actions: read   # нужно для листинга артефактов через REST в gate ниже
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Wait for artifact visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==========================================================="
+          echo "[PAGES] Что делаем: ждём, пока артефакт github-pages станет"
+          echo "[PAGES] виден в API артефактов (обход гонки из deploy-pages#451)"
+          echo "==========================================================="
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          for i in $(seq 1 20); do
+            count=$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api}?per_page=100" \
+              | python3 -c 'import json,sys; print(sum(a["name"] == "github-pages" for a in json.load(sys.stdin)["artifacts"]))' \
+              || echo 0)
+            echo "[PAGES] попытка ${i}: найдено артефактов 'github-pages' = ${count}"
+            if [ "${count}" -eq 1 ]; then
+              echo "[PAGES] Артефакт виден, можно деплоить."
+              exit 0
+            elif [ "${count}" -gt 1 ]; then
+              echo "::error::Дубли артефакта github-pages (${count}). Нельзя ре-ранить этот запуск — запусти workflow заново (workflow_dispatch или push)."
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::Артефакт github-pages так и не появился в API за 100 с — см. github.com/actions/deploy-pages/issues/451. Запусти workflow заново."
+          exit 1
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Smoke test published site
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          echo "==========================================================="
+          echo "[PAGES] Проверяем, что сайт и его ресурсы реально отдаются"
+          echo "==========================================================="
+          base="${SITE_URL%/}"
+          for path in "/" "/index.html" "/style.css" "/script.js"; do
+            code=""
+            for i in $(seq 1 10); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "${base}${path}" || true)
+              [ "${code}" = "200" ] && break
+              sleep 3
+            done
+            echo "[PAGES] ${base}${path} -> ${code}"
+            if [ "${code}" != "200" ]; then
+              echo "::error::${path} отдаёт ${code} вместо 200 (проверь base-path: на GitHub Pages сайт живёт в /<repo>/, пути в HTML должны быть относительными)"
+              exit 1
+            fi
+          done
+          echo "[PAGES] Результат: PASS — сайт опубликован: ${SITE_URL}"
