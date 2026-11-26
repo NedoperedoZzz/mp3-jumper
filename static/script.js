@@ -1,3 +1,10 @@
+// Базовый URL бэкенда. Задаётся в index.html (window.MP3_API_BASE).
+// GitHub Pages умеет отдавать только статику, поэтому реальный FastAPI
+// должен жить на другом хостинге (Render/Fly/Railway/VPS) и быть
+// разрешён в CORS. Пустая строка = тот же источник (локальная разработка).
+const API_BASE = (window.MP3_API_BASE ?? "").replace(/\/+$/, "");
+const apiUrl = (path) => `${API_BASE}${path}`;
+
 let currentSessionId = null;
 let selectedFiles = []; // Массив для хранения файлов в правильном порядке
 
@@ -103,7 +110,7 @@ document.getElementById('mergeBtn').addEventListener('click', async () => {
     progress.style.display = 'block';
 
     try {
-        const res = await fetch('/api/merge', { method: 'POST', body: formData });
+        const res = await fetch(apiUrl('/api/merge'), { method: 'POST', body: formData });
 
         if (!res.ok) throw new Error("Ошибка сервера");
 
@@ -112,9 +119,9 @@ document.getElementById('mergeBtn').addEventListener('click', async () => {
 
         progress.style.display = 'none';
         document.getElementById('resultSection').style.display = 'block';
-        document.getElementById('audioPlayer').src = `/api/download/${currentSessionId}`;
+        document.getElementById('audioPlayer').src = apiUrl(`/api/download/${currentSessionId}`);
                 // Загружаем тайм-коды
-        const tsRes = await fetch(`/api/timestamps/${currentSessionId}`);
+        const tsRes = await fetch(apiUrl(`/api/timestamps/${currentSessionId}`));
         if (tsRes.ok) {
             const tsData = await tsRes.json();
             const tsDiv = document.getElementById('timestamps');
@@ -145,7 +152,7 @@ document.getElementById('generateTitleBtn').addEventListener('click', async () =
     formData.append('session_id', currentSessionId);
     const btn = document.getElementById('generateTitleBtn');
     btn.textContent = "Генерация...";
-    const res = await fetch('/api/generate-title', { method: 'POST', body: formData });
+    const res = await fetch(apiUrl('/api/generate-title'), { method: 'POST', body: formData });
     const data = await res.json();
     document.getElementById('mixTitle').value = data.title;
     btn.textContent = "✨ Сгенерировать ИИ";
@@ -165,7 +172,7 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
     }
 
     // Формируем URL с правильным названием
-    window.location.href = `/api/download/${currentSessionId}?filename=${encodeURIComponent(title)}.mp3`;
+    window.location.href = apiUrl(`/api/download/${currentSessionId}?filename=${encodeURIComponent(title)}.mp3`);
 });
 
 // Логика кнопки "Создать новый микс"

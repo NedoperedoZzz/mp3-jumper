@@ -96,3 +96,10 @@ def download_mix(session_id: str, filename: str = "my_mix.mp3"):
         media_type="audio/mpeg",
         headers={"Accept-Ranges": "bytes"},  # <-- Добавляем поддержку перемотки
     )
+
+
+# Раздаём статику и от корня, чтобы относительные пути в index.html
+# (style.css, script.js, favicon.ico) работали одинаково локально через
+# uvicorn и на GitHub Pages. Монтируем в самом конце: все /api/* маршруты
+# зарегистрированы выше и имеют приоритет.
+app.mount("/", StaticFiles(directory="static", html=True), name="static-root")

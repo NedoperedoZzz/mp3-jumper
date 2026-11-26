@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MixMaster</title>
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/style.css">
+    <!-- Пути ОТНОСИТЕЛЬНЫЕ: на GitHub Pages сайт лежит в /<repo>/, абсолютный /static/ там отдаёт 404 -->
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
@@ -54,6 +55,12 @@
             <button id="resetBtn" class="reset-btn" style="display: block; margin-top: 15px; background: #444; color: white;">Создать новый микс</button>
         </div>
     </div>
-    <script src="/static/script.js"></script>
+    <!-- Адрес бэкенда (FastAPI). GitHub Pages хостит только статику, поэтому на Pages тут должен быть URL запущенного API.
+         Пустая строка = тот же источник (локальный `uvicorn app.main:app`). -->
+    <script>
+        window.MP3_API_BASE = "";
+        // Пример: window.MP3_API_BASE = "https://mp3-jumper.onrender.com";
+    </script>
+    <script src="script.js"></script>
 </body>
 </html>
