@@ -34,6 +34,7 @@ def _ollama_chat_call(model: str, messages: list[dict], options: dict) -> dict:
     """Обёртка для вызова Ollama — мокается в тестах."""
     return ollama_chat(model=model, messages=messages, options=options)
 
+
 SYSTEM_PROMPT = (
     "You are a creative electronic music DJ. Your task is to invent "
     "a short, catchy and atmospheric name for a music mix "
