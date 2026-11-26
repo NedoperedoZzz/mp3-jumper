@@ -68,6 +68,12 @@
         //   window.MP3_API_BASE = "https://mp3-jumper.onrender.com";
         window.MP3_API_BASE = "";
     </script>
+    <script>
+        // На опубликованном сайте ходим на Render, локально — на свой uvicorn.
+        window.MP3_API_BASE = location.hostname.endsWith("github.io")
+        ? "https://<имя-сервиса>.onrender.com"   // ← свой адрес из шага B5
+        : "";  // пусто = запросы на тот же адрес, откуда открыта страница
+    </script>
     <script src="script.js"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@
 где локального Ollama обычно нет и быть не может.
 
   LLM_PROVIDER=ollama   (по умолчанию, для локальной разработки)
-      OLLAMA_MODEL  по умолчанию llama3.2:1b
+      OLLAMA_MODEL  по умолчанию qwen2.5:0.5b
       OLLAMA_HOST   по умолчанию http://127.0.0.1:11434 (берёт библиотеку ollama)
 
   LLM_PROVIDER=openai   любой OpenAI-совместимый API:
@@ -23,6 +23,9 @@
 """
 
 import os
+
+import time
+import uuid
 
 import httpx
 import ollama
@@ -53,7 +56,7 @@ def _clean(text: str) -> str:
 
 
 def _chat_ollama(messages: list[dict], temperature: float) -> str:
-    model_name = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
+    model_name = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     try:
         response = ollama.chat(
             model=model_name,
@@ -123,6 +126,90 @@ def _chat_openai_compatible(messages: list[dict], temperature: float) -> str:
         )
     return _clean(content)
 
+# --- GigaChat (Сбер) ------------------------------------------------------
+# Ключ авторизации (Basic) обменивается на access_token с жизнью 30 минут;
+# сертификаты — НУЦ Минцифры, поэтому verify настраивается отдельно.
+
+_GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+_GIGACHAT_API_BASE = "https://gigachat.devices.sberbank.ru/api/v1"
+_gigachat_cache = {"token": None, "expires_at": 0.0}
+
+
+def _gigachat_verify():
+    bundle = os.getenv("GIGACHAT_CA_BUNDLE", "").strip()
+    if bundle:
+        return bundle
+    return os.getenv("GIGACHAT_VERIFY_SSL", "true").strip().lower() != "false"
+
+
+def _gigachat_access_token() -> str:
+    now = time.time()
+    if _gigachat_cache["token"] and now < _gigachat_cache["expires_at"] - 60:
+        return _gigachat_cache["token"]
+
+    auth_key = os.getenv("GIGACHAT_AUTH_KEY", "").strip()
+    if not auth_key:
+        raise LLMUnavailable("LLM_PROVIDER=gigachat, но не задан GIGACHAT_AUTH_KEY")
+    scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS").strip()
+
+    try:
+        resp = httpx.post(
+            _GIGACHAT_OAUTH_URL,
+            headers={
+                "Authorization": f"Basic {auth_key}",
+                "RqUID": str(uuid.uuid4()),
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            },
+            data={"scope": scope},
+            verify=_gigachat_verify(),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        _gigachat_cache["token"] = payload["access_token"]
+        _gigachat_cache["expires_at"] = float(
+            payload.get("expires_at", (now + 25 * 60) * 1000)
+        ) / 1000
+        return _gigachat_cache["token"]
+    except httpx.HTTPStatusError as exc:
+        raise LLMUnavailable(
+            f"GigaChat OAuth ответил {exc.response.status_code}: {exc.response.text[:200]}"
+        ) from exc
+    except Exception as exc:
+        raise LLMUnavailable(
+            f"Не удалось получить токен GigaChat ({type(exc).__name__}: {exc})"
+        ) from exc
+
+
+def _chat_gigachat(messages: list[dict], temperature: float) -> str:
+    model = os.getenv("GIGACHAT_MODEL", "GigaChat").strip()
+    timeout = float(os.getenv("LLM_TIMEOUT", "60"))
+    token = _gigachat_access_token()
+    try:
+        resp = httpx.post(
+            f"{_GIGACHAT_API_BASE}/chat/completions",
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": 64,
+            },
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            verify=_gigachat_verify(),
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as exc:
+        raise LLMUnavailable(
+            f"GigaChat ответил {exc.response.status_code}: {exc.response.text[:200]}"
+        ) from exc
+    except Exception as exc:
+        raise LLMUnavailable(
+            f"Ошибка обращения к GigaChat ({type(exc).__name__}: {exc})"
+        ) from exc
+    return _clean(content)
 
 def generate_mix_title(prompt: str, temperature: float = 0.1) -> str:
     """Возвращает название микса или бросает LLMUnavailable с понятной причиной."""
@@ -136,6 +223,8 @@ def generate_mix_title(prompt: str, temperature: float = 0.1) -> str:
         title = _chat_openai_compatible(messages, temperature)
     elif provider == "ollama":
         title = _chat_ollama(messages, temperature)
+    elif provider == "gigachat":
+        title = _chat_gigachat(messages, temperature)
     else:
         raise LLMUnavailable(
             f"Неизвестный LLM_PROVIDER={provider!r}; ожидался 'ollama' или 'openai'"
@@ -161,6 +250,14 @@ def llm_status() -> dict:
             "model": required["LLM_MODEL"] or None,
             "configured": not missing,
             "reason": None if not missing else f"не заданы: {', '.join(missing)}",
+        }
+    if provider == "gigachat":
+        auth_key = os.getenv("GIGACHAT_AUTH_KEY", "").strip()
+        return {
+            "provider": "gigachat",
+            "model": os.getenv("GIGACHAT_MODEL", "GigaChat").strip(),
+            "configured": bool(auth_key),
+            "reason": None if auth_key else "не задан GIGACHAT_AUTH_KEY",
         }
     if provider != "ollama":
         return {
