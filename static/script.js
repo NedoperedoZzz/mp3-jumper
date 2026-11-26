@@ -1,273 +1,317 @@
-// Базовый URL бэкенда. Задаётся в index.html (window.MP3_API_BASE).
-// GitHub Pages умеет отдавать только статику, поэтому реальный FastAPI
-// должен жить на другом хостинге (Render/Fly/Railway/VPS) и быть
-// разрешён в CORS. Пустая строка = тот же источник (локальная разработка).
-const API_BASE = (window.MP3_API_BASE ?? "").replace(/\/+$/, "");
-const apiUrl = (path) => `${API_BASE}${path}`;
+// MixMaster, браузерная версия v2.1.
+// Исправление v2.1: оба режима декодируют звук в PCM и кодируют заново.
+// Сырая склейка MP3-кадров из v2 оказалась ненадёжной: разные sample rate,
+// битрейты и Xing-заголовки заставляли плееры играть результат с артефактами
+// (вплоть до повторов первого трека). Декодирование нормализует всё в
+// стерео 44.1 кГц, и стыки становятся чистыми.
+// ИИ-кнопка отключена: ей нужен сервер с секретным ключом, а ключ в коде
+// страницы стал бы публичным.
 
-// --- Состояние бэкенда -------------------------------------------------
-// Страница умеет жить отдельно от API (GitHub Pages), поэтому честно
-// сообщаем, есть ли рядом FastAPI: /api/health отвечает за склейку и за то,
-// настроена ли LLM (Render/Fly локальный Ollama иметь не может в принципе).
-let backendOnline = null; // null = ещё не проверяли
-let llmReady = false;
+const CROSSFADE_SEC = 3;      // максимальная длина перехода в «умном» режиме
+const LIMIT_MIN = 20;         // предупреждение о памяти для длинных миксов
+const MP3_BITRATE_KBPS = 192;
+const SAMPLE_RATE = 44100;
 
-function setBackendStatus(text, kind) {
-    const badge = document.getElementById('backendStatus');
-    if (!badge) return;
-    badge.textContent = text;
-    badge.className = `backend-status backend-status--${kind}`;
+let selectedFiles = [];
+let mixUrl = null;
+
+function setStatus(text, kind) {
+  const badge = document.getElementById('backendStatus');
+  if (!badge) return;
+  badge.textContent = text;
+  badge.className = `backend-status backend-status--${kind}`;
 }
 
-async function checkBackend() {
-    setBackendStatus('Проверяю соединение с бэкендом\u2026', 'checking');
-    try {
-        const res = await fetch(apiUrl('/api/health'), { method: 'GET' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const info = await res.json();
-        backendOnline = true;
-        llmReady = !!(info.llm && info.llm.configured);
-        if (!info.ffmpeg) {
-            setBackendStatus('Бэкенд на связи, но на сервере нет FFmpeg \u2014 склейка невозможна.', 'warn');
-        } else if (llmReady) {
-            setBackendStatus(`Бэкенд на связи. ИИ: ${info.llm.provider}/${info.llm.model}.`, 'ok');
-        } else {
-            setBackendStatus(`Склейка работает. ИИ выключен: ${info.llm.reason || 'модель не настроена'}.`, 'warn');
-        }
-    } catch (err) {
-        backendOnline = false;
-        llmReady = false;
-        // Разные причины по-разному и объясняем: адрес не задан (витрина)
-        // или задан, но сервер молчит (CORS, сон бесплатного тарифа, неверный URL).
-        const reason = API_BASE
-            ? `Бэкенд ${API_BASE} не отвечает (${err.message}). Это может быть сон бесплатного тарифа после простоя или запрет CORS. Повторите проверку.`
-            : 'Бэкенд не подключён (window.MP3_API_BASE пуст): страница работает как витрина. Склейка и ИИ требуют запущенного FastAPI \u2014 см. docs/BACKEND.md.';
-        setBackendStatus(reason + ' Нажмите на строку, чтобы проверить снова.', 'off');
-    }
+// Длительность из метаданных — для предварительной проверки объёма памяти.
+function readDuration(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const audio = document.createElement('audio');
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      const d = audio.duration;
+      URL.revokeObjectURL(url);
+      if (isFinite(d) && d > 0) resolve(d);
+      else reject(new Error(`Не удалось определить длительность: ${file.name}`));
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`${file.name}: не читается как аудио`));
+    };
+    audio.src = url;
+  });
 }
 
-// Описание ошибок для alert: без него пользователь видит «Произошла ошибка»,
-// а настоящих причин три: нет бэкенда (404/CORS), упал ffmpeg (500), не настроена LLM (503).
-async function errorFromResponse(res) {
+async function guardLength(files) {
+  let total = 0;
+  for (const f of files) total += await readDuration(f);
+  const min = total / 60;
+  if (min > LIMIT_MIN &&
+      !confirm(`Микс ~${min.toFixed(0)} мин: обработка в браузере декодирует всё в память (~20 МБ/мин). Продолжить?`)) {
+    throw new Error('склейка отменена: микс слишком длинный для обработки в браузере');
+  }
+}
+
+// --- Декодирование: единый формат для всех треков ------------------------
+async function decodeTracks(files, onProgress) {
+  const decodeCtx = new OfflineAudioContext(2, 1, SAMPLE_RATE);
+  const buffers = [];
+  for (let i = 0; i < files.length; i++) {
+    onProgress(`Декодирование трека ${i + 1} из ${files.length}…`);
     try {
-        const body = await res.json();
-        if (body && (body.error || body.detail)) {
-            return typeof body.detail === 'string' ? body.detail : body.error;
-        }
+      buffers.push(await decodeCtx.decodeAudioData(await files[i].arrayBuffer()));
     } catch (e) {
-        /* тело не JSON (например, 404 от GitHub Pages) */
+      throw new Error(`${files[i].name}: браузер не смог декодировать этот файл как аудио`);
     }
-    return `ошибка сервера (${res.status})`;
+  }
+  return buffers;
 }
 
+// --- Кодирование PCM -> MP3 (lamejs) --------------------------------------
+function floatTo16pcm(channel) {
+  const out = new Int16Array(channel.length);
+  for (let i = 0; i < channel.length; i++) {
+    const s = Math.max(-1, Math.min(1, channel[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+}
 
-let currentSessionId = null;
-let selectedFiles = []; // Массив для хранения файлов в правильном порядке
+function encodeMp3(audioBuffer, onProgress) {
+  if (typeof lamejs === 'undefined') {
+    throw new Error('Библиотека lamejs не загрузилась. Проверь, что lame.min.js лежит рядом и подключён в index.html.');
+  }
+  const encoder = new lamejs.Mp3Encoder(2, audioBuffer.sampleRate, MP3_BITRATE_KBPS);
+  const left = floatTo16pcm(audioBuffer.getChannelData(0));
+  const right = floatTo16pcm(audioBuffer.getChannelData(1));
+  const chunk = 1152 * 32;
+  const parts = [];
+  for (let i = 0; i < left.length; i += chunk) {
+    const encoded = encoder.encodeBuffer(left.subarray(i, i + chunk), right.subarray(i, i + chunk));
+    if (encoded.length) parts.push(encoded);
+    if ((i / chunk) % 16 === 0) {
+      onProgress(`Кодирование в MP3: ${Math.min(100, Math.round((100 * i) / left.length))}%`);
+    }
+  }
+  const tail = encoder.flush();
+  if (tail.length) parts.push(tail);
+  return new Blob(parts, { type: 'audio/mpeg' });
+}
 
-// 1. Загрузка файлов
+// --- Быстрый режим: склейка без переходов ---------------------------------
+function concatBuffers(buffers) {
+  const total = buffers.reduce((n, b) => n + b.length, 0);
+  const ctx = new OfflineAudioContext(2, total, SAMPLE_RATE);
+  const out = ctx.createBuffer(2, total, SAMPLE_RATE);
+  let offset = 0;
+  for (const b of buffers) {
+    for (let ch = 0; ch < 2; ch++) {
+      out.getChannelData(ch).set(b.getChannelData(ch), offset);
+    }
+    offset += b.length;
+  }
+  return out;
+}
+
+async function mergeFast(files, onProgress) {
+  await guardLength(files);
+  const buffers = await decodeTracks(files, onProgress);
+  onProgress('Склейка без переходов…');
+  const mixed = concatBuffers(buffers);
+  onProgress('Кодирование в MP3: 0%');
+  const blob = encodeMp3(mixed, onProgress);
+  let acc = 0;
+  const timestamps = buffers.map((b, i) => {
+    acc += b.duration;
+    return { track: files[i].name, end: acc };
+  });
+  return { blob, timestamps };
+}
+
+// --- Умный режим: кроссфейды ----------------------------------------------
+function equalPowerCurve(steps, fadeIn) {
+  const curve = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const t = steps === 1 ? 1 : i / (steps - 1);
+    curve[i] = fadeIn ? Math.sqrt(t) : Math.sqrt(1 - t);
+  }
+  return curve;
+}
+
+async function mergeSmart(files, onProgress) {
+  await guardLength(files);
+  const buffers = await decodeTracks(files, onProgress);
+  const xf = [];
+  for (let i = 0; i < buffers.length - 1; i++) {
+    xf.push(Math.min(CROSSFADE_SEC, buffers[i].duration / 2, buffers[i + 1].duration / 2));
+  }
+  const starts = [0];
+  for (let i = 1; i < buffers.length; i++) {
+    starts.push(starts[i - 1] + buffers[i - 1].duration - xf[i - 1]);
+  }
+  const total = starts[starts.length - 1] + buffers[buffers.length - 1].duration;
+  const offline = new OfflineAudioContext(2, Math.ceil(total * SAMPLE_RATE), SAMPLE_RATE);
+  buffers.forEach((buf, i) => {
+    const src = offline.createBufferSource();
+    src.buffer = buf;
+    const gain = offline.createGain();
+    const g = gain.gain;
+    const t0 = starts[i];
+    const d = buf.duration;
+    const inXf = i > 0 ? xf[i - 1] : 0;
+    const outXf = i < buffers.length - 1 ? xf[i] : 0;
+    if (inXf > 0) {
+      g.setValueCurveAtTime(equalPowerCurve(Math.max(2, Math.round(inXf * SAMPLE_RATE)), true), t0, inXf);
+      g.setValueAtTime(1, t0 + inXf);
+    } else {
+      g.setValueAtTime(1, t0);
+    }
+    if (outXf > 0) {
+      g.setValueAtTime(1, t0 + d - outXf);
+      g.setValueCurveAtTime(equalPowerCurve(Math.max(2, Math.round(outXf * SAMPLE_RATE)), false), t0 + d - outXf, outXf);
+    }
+    src.connect(gain).connect(offline.destination);
+    src.start(t0);
+  });
+  onProgress('Сведение переходов…');
+  const rendered = await offline.startRendering();
+  onProgress('Кодирование в MP3: 0%');
+  const blob = encodeMp3(rendered, onProgress);
+  const timestamps = buffers.map((buf, i) => ({ track: files[i].name, end: starts[i] + buf.duration }));
+  return { blob, timestamps };
+}
+
+// --- Загрузка файлов и список с drag-and-drop -----------------------------
 document.getElementById('fileInput').addEventListener('change', (e) => {
-    // Добавляем новые файлы к уже существующим
-    const newFiles = Array.from(e.target.files);
-    selectedFiles = selectedFiles.concat(newFiles);
-
-    // Очищаем нативный инпут, чтобы можно было выбрать те же файлы снова,
-    // и чтобы счетчик "N files" не путал
-    e.target.value = '';
-
-    renderFileList();
+  selectedFiles = selectedFiles.concat(Array.from(e.target.files));
+  e.target.value = '';
+  renderFileList();
 });
 
-// 2. Отрисовка списка с Drag-and-Drop
 function renderFileList() {
-    const list = document.getElementById('fileList');
-    list.innerHTML = '';
-
-    selectedFiles.forEach((file, index) => {
-        const li = document.createElement('li');
-        li.draggable = true;
-        li.dataset.index = index;
-                // Добавляем span с корзиной в конец
-        li.innerHTML = `
-            <span class="drag-icon">≡</span>
-            <span class="track-title"><b>${index + 1}.</b> ${file.name}</span>
-            <span class="delete-btn" title="Удалить трек" onclick="removeFile(event, ${index})">🗑️</span>
-        `;
-        // Логика перетаскивания
-        li.addEventListener('dragstart', handleDragStart);
-        li.addEventListener('dragover', handleDragOver);
-        li.addEventListener('drop', handleDrop);
-        li.addEventListener('dragend', handleDragEnd);
-
-        list.appendChild(li);
-    });
-
-    document.getElementById('mergeBtn').disabled = selectedFiles.length < 2;
+  const list = document.getElementById('fileList');
+  list.innerHTML = '';
+  selectedFiles.forEach((file, index) => {
+    const li = document.createElement('li');
+    li.draggable = true;
+    li.dataset.index = index;
+    li.innerHTML = `
+        <span class="drag-icon">≡</span>
+        <span class="track-title"><b>${index + 1}.</b> ${file.name}</span>
+        <span class="delete-btn" title="Удалить трек" onclick="removeFile(event, ${index})">🗑️</span>
+    `;
+    li.addEventListener('dragstart', handleDragStart);
+    li.addEventListener('dragover', handleDragOver);
+    li.addEventListener('drop', handleDrop);
+    li.addEventListener('dragend', handleDragEnd);
+    list.appendChild(li);
+  });
+  document.getElementById('mergeBtn').disabled = selectedFiles.length < 2;
 }
 
-// Функция удаления файла из списка
 function removeFile(event, index) {
-    event.stopPropagation(); // Чтобы не срабатывал drag-and-drop
-    selectedFiles.splice(index, 1);
-    renderFileList();
-
-    // Если файлов не осталось, сбрасываем input
-    if (selectedFiles.length === 0) {
-        document.getElementById('fileInput').value = '';
-    }
+  event.stopPropagation();
+  selectedFiles.splice(index, 1);
+  renderFileList();
+  if (selectedFiles.length === 0) document.getElementById('fileInput').value = '';
 }
 
 let dragSrcEl = null;
-
 function handleDragStart(e) {
-    dragSrcEl = this;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', this.innerHTML);
-    this.classList.add('dragging');
+  dragSrcEl = this;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/html', this.innerHTML);
+  this.classList.add('dragging');
 }
-
 function handleDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    return false;
+  if (e.preventDefault) e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  return false;
 }
-
 function handleDrop(e) {
-    if (e.stopPropagation) e.stopPropagation();
-
-    if (dragSrcEl !== this) {
-        const oldIndex = parseInt(dragSrcEl.dataset.index);
-        const newIndex = parseInt(this.dataset.index);
-
-        // Меняем элементы в массиве местами
-        const movedItem = selectedFiles.splice(oldIndex, 1)[0];
-        selectedFiles.splice(newIndex, 0, movedItem);
-
-        renderFileList(); // Перерисовываем нумерацию
-    }
-    return false;
-}
-
-function handleDragEnd(e) {
-    this.classList.remove('dragging');
-}
-
-// 3. Отправка на сервер
-document.getElementById('mergeBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('mergeBtn');
-    const progress = document.getElementById('progressContainer');
-    const smartMode = document.getElementById('smartMode').checked;
-
-    const formData = new FormData();
-    // ВАЖНО: Отправляем файлы строго в том порядке, в котором они в массиве!
-    selectedFiles.forEach(file => formData.append('files', file));
-    formData.append('use_smart', smartMode ? 'true' : 'false');
-
-    btn.style.display = 'none';
-    progress.style.display = 'block';
-
-    try {
-        const res = await fetch(apiUrl('/api/merge'), { method: 'POST', body: formData });
-
-        if (!res.ok) throw new Error(await errorFromResponse(res));
-
-        const data = await res.json();
-        currentSessionId = data.session_id;
-
-        progress.style.display = 'none';
-        document.getElementById('resultSection').style.display = 'block';
-        document.getElementById('audioPlayer').src = apiUrl(`/api/download/${currentSessionId}`);
-                // Загружаем тайм-коды
-        const tsRes = await fetch(apiUrl(`/api/timestamps/${currentSessionId}`));
-        if (tsRes.ok) {
-            const tsData = await tsRes.json();
-            const tsDiv = document.getElementById('timestamps');
-            const tsList = document.getElementById('tsList');
-            tsList.innerHTML = '';
-            tsData.forEach((ts, i) => {
-                // Красиво форматируем время (например, 03:45)
-                const formatTime = (sec) => {
-                    const m = Math.floor(sec / 60);
-                    const s = Math.floor(sec % 60);
-                    return `${m}:${s < 10 ? '0' : ''}${s}`;
-                };
-                tsList.innerHTML += `<li style="margin-bottom:5px;">Трек ${i+1} (<span style="color:#fff">${ts.track}</span>): конец в <b>${formatTime(ts.end)}</b></li>`;
-            });
-            tsDiv.style.display = 'block';
-        }
-    } catch (err) {
-        alert(`Не получилось склеить: ${err.message}`);
-        progress.style.display = 'none';
-        btn.style.display = 'block';
-    }
-});
-
-// Остальные функции (generateTitleBtn, downloadBtn) остаются без изменений
-document.getElementById('generateTitleBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('generateTitleBtn');
-    if (!currentSessionId) {
-        alert("Сначала склейте треки: сервер предлагает название по метаданным готового микса.");
-        return;
-    }
-    const formData = new FormData();
-    formData.append('session_id', currentSessionId);
-    btn.textContent = "Генерация...";
-    try {
-        const res = await fetch(apiUrl('/api/generate-title'), { method: 'POST', body: formData });
-        if (!res.ok) throw new Error(await errorFromResponse(res));
-        const data = await res.json();
-        document.getElementById('mixTitle').value = data.title;
-    } catch (err) {
-        // 503 = бэкенд жив, но модель недоступна (на Render её обычно нет)
-        alert(`ИИ не сгенерировал название: ${err.message}`);
-    } finally {
-        btn.textContent = "✨ Сгенерировать ИИ";
-    }
-});
-
-document.getElementById('downloadBtn').addEventListener('click', () => {
-    let title = document.getElementById('mixTitle').value.trim();
-
-    // Если пользователь ничего не ввел, используем дефолтное
-    if (!title) {
-        title = "my_mix";
-    }
-
-    // Проверяем, нет ли уже "(Mix)" в конце названия, чтобы не дублировать
-    if (!title.toLowerCase().endsWith("(mix)")) {
-        title += " (Mix)";
-    }
-
-    // Формируем URL с правильным названием
-    window.location.href = apiUrl(`/api/download/${currentSessionId}?filename=${encodeURIComponent(title)}.mp3`);
-});
-
-// Логика кнопки "Создать новый микс"
-document.getElementById('resetBtn').addEventListener('click', () => {
-    // 1. Очищаем данные
-    selectedFiles = [];
-    currentSessionId = null;
-
-    // 2. Очищаем поле ввода файлов
-    document.getElementById('fileInput').value = '';
-
-    // 3. Обновляем список (он станет пустым)
+  if (e.stopPropagation) e.stopPropagation();
+  if (dragSrcEl !== this) {
+    const oldIndex = parseInt(dragSrcEl.dataset.index);
+    const newIndex = parseInt(this.dataset.index);
+    const movedItem = selectedFiles.splice(oldIndex, 1)[0];
+    selectedFiles.splice(newIndex, 0, movedItem);
     renderFileList();
+  }
+  return false;
+}
+function handleDragEnd() {
+  this.classList.remove('dragging');
+}
 
-    // 4. Останавливаем и сбрасываем плеер
-    const audio = document.getElementById('audioPlayer');
-    audio.pause();
-    audio.src = '';
-
-    // 5. Прячем секцию с результатом и тайм-кодами
-    document.getElementById('resultSection').style.display = 'none';
-    document.getElementById('timestamps').style.display = 'none';
-    document.getElementById('mixTitle').value = 'my_mix'; // Сброс названия
-
-    // 6. Возвращаем кнопку "Объединить в микс" на место
-    document.getElementById('mergeBtn').style.display = 'block';
-    document.getElementById('mergeBtn').disabled = true;
+// --- Склейка ----------------------------------------------------------------
+document.getElementById('mergeBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('mergeBtn');
+  const progress = document.getElementById('progressContainer');
+  const smart = document.getElementById('smartMode').checked;
+  // Диагностика: видно, какие именно файлы ушли в склейку (F12 → Console).
+  console.log('merge:', selectedFiles.map((f) => `${f.name} (${f.size} байт)`));
+  btn.style.display = 'none';
+  progress.style.display = 'block';
+  progress.textContent = 'Обработка…';
+  try {
+    const result = smart
+      ? await mergeSmart(selectedFiles, (msg) => { progress.textContent = msg; })
+      : await mergeFast(selectedFiles, (msg) => { progress.textContent = msg; });
+    if (mixUrl) URL.revokeObjectURL(mixUrl);
+    mixUrl = URL.createObjectURL(result.blob);
+    document.getElementById('audioPlayer').src = mixUrl;
+    const tsList = document.getElementById('tsList');
+    tsList.innerHTML = '';
+    const formatTime = (sec) => {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+    result.timestamps.forEach((ts, i) => {
+      tsList.innerHTML += `<li style="margin-bottom:5px;">Трек ${i + 1} (<span style="color:#fff">${ts.track}</span>): конец в <b>${formatTime(ts.end)}</b></li>`;
+    });
+    document.getElementById('timestamps').style.display = 'block';
+    document.getElementById('resultSection').style.display = 'block';
+    progress.style.display = 'none';
+  } catch (err) {
+    alert(`Не получилось склеить: ${err.message}`);
+    progress.style.display = 'none';
+    btn.style.display = 'block';
+  }
 });
 
-// Проверка бэкенда при загрузке и по клику на плашку (повторная попытка).
-checkBackend();
-document.getElementById('backendStatus')?.addEventListener('click', checkBackend);
+// --- ИИ-кнопка: честно отключена --------------------------------------------
+const genBtn = document.getElementById('generateTitleBtn');
+genBtn.disabled = true;
+genBtn.title = 'ИИ-название требует сервера с секретным ключом модели. В бессерверной версии отключено, чтобы не публиковать ключ в коде страницы.';
+
+// --- Скачивание ---------------------------------------------------------------
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  if (!mixUrl) { alert('Сначала склей треки.'); return; }
+  let title = document.getElementById('mixTitle').value.trim() || 'my_mix';
+  if (!title.toLowerCase().endsWith('(mix)')) title += ' (Mix)';
+  const a = document.createElement('a');
+  a.href = mixUrl;
+  a.download = `${title}.mp3`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+// --- Сброс -----------------------------------------------------------------------
+document.getElementById('resetBtn').addEventListener('click', () => {
+  selectedFiles = [];
+  if (mixUrl) { URL.revokeObjectURL(mixUrl); mixUrl = null; }
+  document.getElementById('fileInput').value = '';
+  renderFileList();
+  const audio = document.getElementById('audioPlayer');
+  audio.pause();
+  audio.src = '';
+  document.getElementById('resultSection').style.display = 'none';
+  document.getElementById('timestamps').style.display = 'none';
+  document.getElementById('mixTitle').value = 'my_mix';
+  document.getElementById('mergeBtn').style.display = 'block';
+  document.getElementById('mergeBtn').disabled = true;
+});
+
+setStatus('Бессерверный режим: склейка и скачивание выполняются в твоём браузере. ИИ-кнопка отключена (ей нужен сервер с ключом).', 'ok');

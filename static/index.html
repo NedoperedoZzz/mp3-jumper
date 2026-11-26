@@ -27,7 +27,7 @@
         <div class="options">
             <label>
                 <input type="checkbox" id="smartMode">
-                <b>Умные переходы (pyCrossfade)</b> <span style="color:#888; font-size:12px;">(анализ BPM, может занять несколько минут)</span>
+                <b>Умные переходы (плавные кроссфейды, кодирование на твоём устройстве)</b> <span style="color:#888; font-size:12px;">(анализ BPM, может занять несколько минут)</span>
             </label>
         </div>
 
@@ -68,12 +68,8 @@
         //   window.MP3_API_BASE = "https://mp3-jumper.onrender.com";
         window.MP3_API_BASE = "";
     </script>
-    <script>
-        // На опубликованном сайте ходим на Render, локально — на свой uvicorn.
-        window.MP3_API_BASE = location.hostname.endsWith("github.io")
-        ? "https://<имя-сервиса>.onrender.com"   // ← свой адрес из шага B5
-        : "";  // пусто = запросы на тот же адрес, откуда открыта страница
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+    <script src="lame.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
