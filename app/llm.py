@@ -29,6 +29,7 @@ import uuid
 import httpx
 from ollama import chat as ollama_chat
 
+
 def _ollama_chat_call(model: str, messages: list[dict], options: dict) -> dict:
     """Обёртка для вызова Ollama — мокается в тестах."""
     return ollama_chat(model=model, messages=messages, options=options)
