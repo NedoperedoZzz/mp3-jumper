@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MixMaster</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>MixMaster 🎵</h1>
+    <p>Загрузите MP3-файлы и перетащите их в нужном порядке.</p>
+    <div id="backendStatus" class="backend-status backend-status--checking">
+        Проверяю соединение с бэкендом…
+    </div>
+
+    <input type="file" id="fileInput" accept="audio/mpeg" multiple>
+    <button id="addBtn">+ Добавить MP3 файлы</button>
+
+    <ul id="fileList"></ul>
+
+    <label>
+        <input type="checkbox" id="smartMode">
+        Умные переходы (pyCrossfade)
+        <small>(анализ BPM, может занять несколько минут)</small>
+    </label>
+    <button id="mergeBtn" disabled>Объединить в микс</button>
+
+    <div id="progressContainer" style="display:none;">
+        Идет обработка. Пожалуйста, подождите...
+    </div>
+
+    <div id="resultSection" style="display:none;">
+        <h2>Ваш микс готов!</h2>
+        <audio id="audioPlayer" controls></audio>
+
+        <div id="timestamps" style="display:none;">
+            <h3>Тайм-коды треков:</h3>
+            <ul id="tsList"></ul>
+        </div>
+
+        <input type="text" id="mixTitle" placeholder="Название микса" value="my_mix">
+        <button id="generateTitleBtn">✨ Сгенерировать ИИ</button>
+        <button id="downloadBtn">Скачать MP3</button>
+        <button id="resetBtn">Создать новый микс</button>
+    </div>
+
+    <script>
+        // Локальная разработка: бэкенд поднят на том же адресе, где и страница
+        // (uvicorn отдаёт static/). Для развёрнутого сайта замените на:
+        //   window.MP3_API_BASE = "https://<ваш-сервер>.onrender.com";
+        window.MP3_API_BASE = "";
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>

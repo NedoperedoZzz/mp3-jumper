@@ -1,7 +1,0 @@
-category,item
-NLP,classification
-MCP,tool-call
-NLP,embeddings
-Agents,planning
-MCP,filesystem
-Agents,checkpoint

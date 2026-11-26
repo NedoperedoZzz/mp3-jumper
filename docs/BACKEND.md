@@ -1,5 +1,8 @@
 # Бэкенд для опубликованного сайта (GitHub Pages + внешний FastAPI)
 
+**Примечание для тех, кто читает этот документ.**
+В репозитории (директория [app/](https://github.com/NedoperedoZzz/mp3-jumper/tree/master/app)) лежит полноценный FastAPI-бэкенд (склейка через FFmpeg, ИИ-названия через Ollama / OpenAI-совместимое API / GigaChat, CORS, тесты, Dockerfile) и тесты к нему (директория [tests/](https://github.com/NedoperedoZzz/mp3-jumper/tree/master/tests)). Однако **текущая опубликованная версия сайта работает в бессерверном режиме**: склейка и кодирование выполняются в браузере посетителя (Web Audio API + lamejs), а ИИ-кнопка отключена. Эта документация описывает бэкенд, чтобы его можно было развернуть на своём сервере после форка репозитория и вернуть серверную склейку и ИИ-генерацию названий. Фронтенд, рабочий в связке с бэком локально или на сервере по ссылке: [frontend/](https://github.com/NedoperedoZzz/mp3-jumper/tree/master/frontend).
+
 Опубликованная на GitHub Pages страница — это **витрина**: Pages раздаёт только файлы
 (`index.html`, `style.css`, `script.js`), никакой Python там не выполняется. Поэтому
 `/api/merge` и `/api/generate-title` на `https://<user>.github.io/mp3-jumper/` дают 404,
