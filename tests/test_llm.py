@@ -6,7 +6,7 @@ from app.llm import LLMUnavailable, generate_mix_title, llm_status
 def test_generate_mix_title_success(mocker):
     """Проверяем, что название корректно извлекается из ответа Ollama."""
     # Мокаем функцию chat из библиотеки ollama
-    mock_chat = mocker.patch("app.llm.ollama.chat")
+    mock_chat = mocker.patch("app.llm.ollama_chat")
 
     # Имитируем ответ от Ollama
     mock_chat.return_value = {
@@ -26,7 +26,7 @@ def test_generate_mix_title_raises_when_ollama_down(mocker):
     Иначе на опубликованном сайте константа "Midnight Mix (Fallback)"
     выглядела бы как реально сгенерированное ИИ название.
     """
-    mocker.patch("app.llm.ollama.chat", side_effect=Exception("Connection error"))
+    mocker.patch("app.llm.ollama_chat", side_effect=Exception("Connection error"))
 
     with pytest.raises(LLMUnavailable) as err:
         generate_mix_title("Artist - Track")
@@ -37,7 +37,7 @@ def test_generate_mix_title_raises_when_ollama_down(mocker):
 
 def test_generate_mix_title_rejects_empty_answer(mocker):
     """Пустой ответ модели — это тоже ошибка, а не название."""
-    mocker.patch("app.llm.ollama.chat", return_value={"message": {"content": '  "'}})
+    mocker.patch("app.llm.ollama_chat", return_value={"message": {"content": '  "'}})
 
     with pytest.raises(LLMUnavailable):
         generate_mix_title("Artist - Track")
@@ -50,16 +50,15 @@ def test_generate_mix_title_cloud_provider(mocker, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "secret-key")
     monkeypatch.setenv("LLM_MODEL", "some-cloud-1b")
 
-    ollama_chat = mocker.patch("app.llm.ollama.chat")
+    ollama_mock = mocker.patch("app.llm.ollama_chat")
     post = mocker.patch("app.llm.httpx.post")
     post.return_value.json.return_value = {
         "choices": [{"message": {"content": "'Midnight Pulse'"}}]
     }
-
     title = generate_mix_title("Artist - Track", temperature=0.5)
-
     assert title == "Midnight Pulse"
-    ollama_chat.assert_not_called()
+    ollama_mock.assert_not_called()
+
     args, kwargs = post.call_args
     assert args[0] == "https://api.example.com/v1/chat/completions"
     assert kwargs["headers"]["Authorization"] == "Bearer secret-key"

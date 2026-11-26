@@ -23,12 +23,15 @@
 """
 
 import os
-
 import time
 import uuid
 
 import httpx
-import ollama
+from ollama import chat as ollama_chat
+
+def _ollama_chat_call(model: str, messages: list[dict], options: dict) -> dict:
+    """Обёртка для вызова Ollama — мокается в тестах."""
+    return ollama_chat(model=model, messages=messages, options=options)
 
 SYSTEM_PROMPT = (
     "You are a creative electronic music DJ. Your task is to invent "
@@ -58,7 +61,7 @@ def _clean(text: str) -> str:
 def _chat_ollama(messages: list[dict], temperature: float) -> str:
     model_name = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     try:
-        response = ollama.chat(
+        response = _ollama_chat_call(
             model=model_name,
             messages=messages,
             options={
@@ -126,6 +129,7 @@ def _chat_openai_compatible(messages: list[dict], temperature: float) -> str:
         )
     return _clean(content)
 
+
 # --- GigaChat (Сбер) ------------------------------------------------------
 # Ключ авторизации (Basic) обменивается на access_token с жизнью 30 минут;
 # сертификаты — НУЦ Минцифры, поэтому verify настраивается отдельно.
@@ -168,13 +172,13 @@ def _gigachat_access_token() -> str:
         resp.raise_for_status()
         payload = resp.json()
         _gigachat_cache["token"] = payload["access_token"]
-        _gigachat_cache["expires_at"] = float(
-            payload.get("expires_at", (now + 25 * 60) * 1000)
-        ) / 1000
+        _gigachat_cache["expires_at"] = (
+            float(payload.get("expires_at", (now + 25 * 60) * 1000)) / 1000
+        )
         return _gigachat_cache["token"]
     except httpx.HTTPStatusError as exc:
         raise LLMUnavailable(
-            f"GigaChat OAuth ответил {exc.response.status_code}: {exc.response.text[:200]}"
+            f"GC OAuth ответил {exc.response.status_code}: {exc.response.text[:200]}"
         ) from exc
     except Exception as exc:
         raise LLMUnavailable(
@@ -210,6 +214,7 @@ def _chat_gigachat(messages: list[dict], temperature: float) -> str:
             f"Ошибка обращения к GigaChat ({type(exc).__name__}: {exc})"
         ) from exc
     return _clean(content)
+
 
 def generate_mix_title(prompt: str, temperature: float = 0.1) -> str:
     """Возвращает название микса или бросает LLMUnavailable с понятной причиной."""
